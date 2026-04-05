@@ -9,9 +9,9 @@
 
     <application
         android:allowBackup="true"
-        android:icon="@drawable/ic_scouter_badge"
+        android:icon="@drawable/dragon_ball_scouter_logo"
         android:label="@string/app_name"
-        android:roundIcon="@drawable/ic_scouter_badge"
+        android:roundIcon="@drawable/dragon_ball_scouter_logo"
         android:supportsRtl="true"
         android:theme="@style/Theme.RokidDragonBallHUD">
         <activity

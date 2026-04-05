@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Rokid-DragonBallHUD"
+rootProject.name = "Rokid-DragonBallScouter"
 include(":app")

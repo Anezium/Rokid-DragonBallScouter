@@ -6,6 +6,7 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.media.MediaPlayer;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -47,7 +48,9 @@ import com.google.mlkit.vision.face.FaceDetection;
 import com.google.mlkit.vision.face.FaceDetector;
 import com.google.mlkit.vision.face.FaceDetectorOptions;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -57,9 +60,12 @@ public class MainActivity extends AppCompatActivity {
     private static final long LOST_TARGET_GRACE_MS = 450L;
     private static final long TARGET_PREDICTION_GRACE_MS = 900L;
     private static final long FRESH_TRACK_WINDOW_MS = 180L;
-    private static final long POWER_RESEED_MS = 7_000L;
+    private static final long POWER_REVEAL_DURATION_MS = 6_000L;
+    private static final long POWER_SCRAMBLE_INTERVAL_MS = 90L;
     private static final long SCAN_SESSION_TIMEOUT_MS = 20_000L;
     private static final long SENSOR_RENDER_INTERVAL_MS = 33L;
+    private static final long POWER_PROFILE_RETENTION_MS = 30_000L;
+    private static final long POWER_PROFILE_MATCH_WINDOW_MS = 2_000L;
 
     private static final float DEFAULT_SENSOR_HORIZONTAL_FOV_RAD = (float) Math.toRadians(68.0);
     private static final float DEFAULT_SENSOR_VERTICAL_FOV_RAD = (float) Math.toRadians(52.0);
@@ -68,6 +74,8 @@ public class MainActivity extends AppCompatActivity {
     private static final float DISPLAY_MARGIN_RATIO = 0.10f;
     private static final float MODE_SWIPE_DISTANCE_DP = 42f;
     private static final float MODE_SWIPE_DOMINANCE = 1.35f;
+    private static final float POWER_PROFILE_CENTER_THRESHOLD = 0.18f;
+    private static final float POWER_PROFILE_SIZE_THRESHOLD = 0.12f;
 
     private PreviewView previewView;
     private ScouterOverlayView hudView;
@@ -76,6 +84,7 @@ public class MainActivity extends AppCompatActivity {
     private FaceDetector faceDetector;
     private ExecutorService cameraExecutor;
     private ProcessCameraProvider cameraProvider;
+    private MediaPlayer revealSoundPlayer;
 
     private SensorManager sensorManager;
     private Sensor gameRotationVectorSensor;
@@ -126,9 +135,11 @@ public class MainActivity extends AppCompatActivity {
 
     private Integer currentTargetId = null;
     private int currentPowerLevel = PowerLevelGenerator.next();
+    private PowerProfile currentPowerProfile = null;
     private long lastFaceSeenAt = 0L;
-    private long lastPowerSeedAt = 0L;
     private long lastSensorRenderAt = 0L;
+    private final List<PowerProfile> powerProfiles = new ArrayList<>();
+    private int nextPowerProfileId = 1;
 
     private boolean pendingScanRequest = false;
     private String activeLensLabel = "AUTO CAM";
@@ -273,9 +284,11 @@ public class MainActivity extends AppCompatActivity {
         scanSessionActive = true;
         currentTargetId = null;
         currentPowerLevel = PowerLevelGenerator.next();
+        currentPowerProfile = null;
         lastFaceSeenAt = 0L;
-        lastPowerSeedAt = 0L;
         activeLensLabel = getString(R.string.lens_booting);
+        powerProfiles.clear();
+        nextPowerProfileId = 1;
 
         resetAngularState();
         startHeadTracking();
@@ -461,6 +474,7 @@ public class MainActivity extends AppCompatActivity {
         updateActiveFovForImage(imageWidth, imageHeight);
 
         if (faces.isEmpty()) {
+            clearActivePresentation();
             if (hasRenderableTarget(now)) {
                 renderTrackedHud(now);
             } else {
@@ -493,17 +507,13 @@ public class MainActivity extends AppCompatActivity {
         lastTargetWorldYawRad = normalizeAngle(headYawRad + cameraYawRad);
         lastTargetWorldPitchRad = normalizeAngle(headPitchRad + cameraPitchRad);
 
-        int detectedTargetId = bestFace.getTrackingId() != null ? bestFace.getTrackingId() : -1;
-        boolean shouldReseedPower = currentTargetId == null
-                || currentTargetId != detectedTargetId
-                || now - lastPowerSeedAt > POWER_RESEED_MS
-                || now - lastFaceSeenAt > TARGET_PREDICTION_GRACE_MS;
-
-        if (shouldReseedPower) {
-            currentTargetId = detectedTargetId;
-            currentPowerLevel = PowerLevelGenerator.next();
-            lastPowerSeedAt = now;
+        PowerProfile powerProfile = resolvePowerProfile(bestFace, bounds, imageWidth, imageHeight, now);
+        if (powerProfile != currentPowerProfile) {
+            beginPowerPresentation(powerProfile, now);
         }
+        currentPowerProfile = powerProfile;
+        currentTargetId = powerProfile.displayTargetId;
+        currentPowerLevel = powerProfile.powerLevel;
 
         lastFaceSeenAt = now;
         renderTrackedHud(now);
@@ -530,14 +540,16 @@ public class MainActivity extends AppCompatActivity {
         }
 
         boolean predictive = now - lastFaceSeenAt > FRESH_TRACK_WINDOW_MS;
-        String statusLabel = resolveTrackingStatusLabel(predictive);
+        boolean powerLevelRevealed = isPowerLevelRevealed(now);
+        int displayedPowerLevel = getDisplayedPowerLevel(now);
+        String statusLabel = resolveTrackingStatusLabel(predictive, powerLevelRevealed);
 
         hudView.render(HudState.activeAngular(
                 statusLabel,
                 activeLensLabel,
-                currentPowerLevel,
+                displayedPowerLevel,
                 currentTargetId != null && currentTargetId >= 0 ? currentTargetId : 1,
-                currentPowerLevel > 9000,
+                powerLevelRevealed && currentPowerLevel > 9000,
                 projectedLock.centerX,
                 projectedLock.centerY,
                 projectedLock.lockScale,
@@ -555,7 +567,9 @@ public class MainActivity extends AppCompatActivity {
         }
 
         boolean predictive = now - lastFaceSeenAt > FRESH_TRACK_WINDOW_MS;
-        String statusLabel = resolveTrackingStatusLabel(predictive);
+        boolean powerLevelRevealed = isPowerLevelRevealed(now);
+        int displayedPowerLevel = getDisplayedPowerLevel(now);
+        String statusLabel = resolveTrackingStatusLabel(predictive, powerLevelRevealed);
 
         hudView.render(HudState.active(
                 statusLabel,
@@ -563,9 +577,9 @@ public class MainActivity extends AppCompatActivity {
                 new RectF(lastTargetRect),
                 lastTargetImageWidth,
                 lastTargetImageHeight,
-                currentPowerLevel,
+                displayedPowerLevel,
                 currentTargetId != null && currentTargetId >= 0 ? currentTargetId : 1,
-                currentPowerLevel > 9000,
+                powerLevelRevealed && currentPowerLevel > 9000,
                 getModePrompt(),
                 getModeLabel(),
                 predictive,
@@ -623,7 +637,7 @@ public class MainActivity extends AppCompatActivity {
         } else {
             displayYawOffsetRad = 0f;
             displayPitchOffsetRad = 0f;
-            renderScanningState(getString(R.string.status_recentered), activeLensLabel);
+            renderScanningState(getString(R.string.status_scanning), activeLensLabel);
         }
     }
 
@@ -745,8 +759,170 @@ public class MainActivity extends AppCompatActivity {
                 : canProjectTarget(now);
     }
 
+    private boolean isPowerLevelRevealed(long now) {
+        return currentPowerProfile == null
+                || now - currentPowerProfile.analysisStartedAt >= POWER_REVEAL_DURATION_MS;
+    }
+
+    private int getDisplayedPowerLevel(long now) {
+        if (isPowerLevelRevealed(now) || currentPowerProfile == null) {
+            return currentPowerLevel;
+        }
+        return scramblePowerLevel(currentPowerProfile, now);
+    }
+
+    private int scramblePowerLevel(PowerProfile profile, long now) {
+        long frame = now / POWER_SCRAMBLE_INTERVAL_MS;
+        long seed = (frame * 1103515245L)
+                + (profile.displayTargetId * 12345L)
+                + (profile.powerLevel * 31L);
+        int roll = positiveMod(seed >>> 3, 100);
+        if (roll < 10) {
+            return 9001 + positiveMod(seed * 13L + 7L, 76000);
+        }
+        if (roll < 45) {
+            return 2800 + positiveMod(seed * 17L + 11L, 6200);
+        }
+        return 120 + positiveMod(seed * 19L + 13L, 2680);
+    }
+
+    private int positiveMod(long value, int mod) {
+        return (int) Math.floorMod(value, mod);
+    }
+
+    private void beginPowerPresentation(PowerProfile profile, long now) {
+        stopRevealSound();
+        profile.analysisStartedAt = now;
+        startRevealSound();
+    }
+
+    private void clearActivePresentation() {
+        currentPowerProfile = null;
+        stopRevealSound();
+    }
+
+    private void startRevealSound() {
+        stopRevealSound();
+        revealSoundPlayer = MediaPlayer.create(this, R.raw.scouter_detector_dragon_ball);
+        if (revealSoundPlayer == null) {
+            return;
+        }
+        revealSoundPlayer.setOnCompletionListener(player -> {
+            player.release();
+            if (revealSoundPlayer == player) {
+                revealSoundPlayer = null;
+            }
+        });
+        revealSoundPlayer.start();
+    }
+
+    private void stopRevealSound() {
+        if (revealSoundPlayer == null) {
+            return;
+        }
+        try {
+            if (revealSoundPlayer.isPlaying()) {
+                revealSoundPlayer.stop();
+            }
+        } catch (IllegalStateException ignored) {
+        }
+        revealSoundPlayer.release();
+        revealSoundPlayer = null;
+    }
+
+    private PowerProfile resolvePowerProfile(
+            Face face,
+            Rect bounds,
+            int imageWidth,
+            int imageHeight,
+            long now
+    ) {
+        prunePowerProfiles(now);
+
+        Integer trackingId = face.getTrackingId();
+        float centerXNorm = imageWidth > 0 ? bounds.exactCenterX() / imageWidth : 0.5f;
+        float centerYNorm = imageHeight > 0 ? bounds.exactCenterY() / imageHeight : 0.5f;
+        float sizeNorm = Math.max(
+                imageWidth > 0 ? bounds.width() / (float) imageWidth : 0f,
+                imageHeight > 0 ? bounds.height() / (float) imageHeight : 0f
+        );
+
+        PowerProfile match = null;
+        if (trackingId != null) {
+            for (PowerProfile profile : powerProfiles) {
+                if (trackingId.equals(profile.trackingId)) {
+                    match = profile;
+                    break;
+                }
+            }
+        }
+
+        if (match == null) {
+            match = findNearestPowerProfile(centerXNorm, centerYNorm, sizeNorm, now);
+        }
+
+        if (match == null) {
+            match = new PowerProfile(nextPowerProfileId++, PowerLevelGenerator.next(), now);
+            powerProfiles.add(match);
+        }
+
+        if (trackingId != null) {
+            match.trackingId = trackingId;
+        }
+
+        match.centerXNorm = centerXNorm;
+        match.centerYNorm = centerYNorm;
+        match.sizeNorm = sizeNorm;
+        match.lastSeenAt = now;
+        return match;
+    }
+
+    private PowerProfile findNearestPowerProfile(
+            float centerXNorm,
+            float centerYNorm,
+            float sizeNorm,
+            long now
+    ) {
+        PowerProfile bestMatch = null;
+        float bestScore = Float.MAX_VALUE;
+
+        for (PowerProfile profile : powerProfiles) {
+            if (now - profile.lastSeenAt > POWER_PROFILE_MATCH_WINDOW_MS) {
+                continue;
+            }
+
+            float centerDistance = Math.abs(profile.centerXNorm - centerXNorm)
+                    + Math.abs(profile.centerYNorm - centerYNorm);
+            float sizeDistance = Math.abs(profile.sizeNorm - sizeNorm);
+
+            if (centerDistance > POWER_PROFILE_CENTER_THRESHOLD
+                    || sizeDistance > POWER_PROFILE_SIZE_THRESHOLD) {
+                continue;
+            }
+
+            float score = centerDistance + (sizeDistance * 0.5f);
+            if (score < bestScore) {
+                bestScore = score;
+                bestMatch = profile;
+            }
+        }
+
+        return bestMatch;
+    }
+
+    private void prunePowerProfiles(long now) {
+        Iterator<PowerProfile> iterator = powerProfiles.iterator();
+        while (iterator.hasNext()) {
+            PowerProfile profile = iterator.next();
+            if (now - profile.lastSeenAt > POWER_PROFILE_RETENTION_MS) {
+                iterator.remove();
+            }
+        }
+    }
+
     private void clearTrackedTarget() {
         currentTargetId = null;
+        clearActivePresentation();
         lastTargetWorldYawRad = Float.NaN;
         lastTargetWorldPitchRad = Float.NaN;
         lastTargetRect = null;
@@ -776,10 +952,12 @@ public class MainActivity extends AppCompatActivity {
         scanSessionActive = false;
         pendingScanRequest = false;
         currentTargetId = null;
+        clearActivePresentation();
         lastFaceSeenAt = 0L;
-        lastPowerSeedAt = 0L;
         analyzerBusy.set(false);
         sessionHandler.removeCallbacks(scanTimeoutRunnable);
+        powerProfiles.clear();
+        nextPowerProfileId = 1;
 
         stopHeadTracking();
         resetAngularState();
@@ -895,8 +1073,8 @@ public class MainActivity extends AppCompatActivity {
                 : getString(R.string.mode_angular_lock);
     }
 
-    private String resolveTrackingStatusLabel(boolean predictive) {
-        if (currentPowerLevel > 9000) {
+    private String resolveTrackingStatusLabel(boolean predictive, boolean powerLevelRevealed) {
+        if (powerLevelRevealed && currentPowerLevel > 9000) {
             return getString(R.string.status_over_9000);
         }
         if (predictive) {
@@ -934,6 +1112,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         sessionHandler.removeCallbacks(scanTimeoutRunnable);
+        stopRevealSound();
         stopHeadTracking();
         if (cameraProvider != null) {
             cameraProvider.unbindAll();
@@ -968,5 +1147,22 @@ public class MainActivity extends AppCompatActivity {
     private enum DisplayMode {
         ANGULAR_HUD,
         LIVE_CAMERA
+    }
+
+    private static final class PowerProfile {
+        final int displayTargetId;
+        final int powerLevel;
+        long analysisStartedAt;
+        Integer trackingId;
+        float centerXNorm;
+        float centerYNorm;
+        float sizeNorm;
+        long lastSeenAt;
+
+        PowerProfile(int displayTargetId, int powerLevel, long analysisStartedAt) {
+            this.displayTargetId = displayTargetId;
+            this.powerLevel = powerLevel;
+            this.analysisStartedAt = analysisStartedAt;
+        }
     }
 }

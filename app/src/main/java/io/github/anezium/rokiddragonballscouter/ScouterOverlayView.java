@@ -3,7 +3,6 @@ package io.github.anezium.rokiddragonballscouter;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.CornerPathEffect;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.os.SystemClock;
@@ -12,253 +11,277 @@ import android.view.View;
 
 import java.util.Locale;
 
+/**
+ * Full-screen HUD overlay styled after the Dragon Ball scouter.
+ * <p>
+ * Designed for monochrome-green AR displays: all visual hierarchy
+ * is achieved through brightness (alpha), thickness and size —
+ * not hue.  Every paint uses the same green base colour.
+ */
 public class ScouterOverlayView extends View {
-    private final float density = getResources().getDisplayMetrics().density;
 
-    private final Paint hudPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint amberPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint sweepPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint headlinePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint smallPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint solidPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final float dp = getResources().getDisplayMetrics().density;
 
-    private HudState hudState = HudState.idle("PRESS TO SCAN", "STANDBY", "Tap glasses or screen", true);
+    /* ── single-hue green palette ─────────────────────────────────── */
+    private static final int G = 0xFF88FF44;
 
-    public ScouterOverlayView(Context context) {
-        super(context);
-        init();
-    }
+    private final Paint framePaint    = stroke(G, 1.5f);
+    private final Paint arcPaint      = stroke(alpha(G, 155), 1f);
+    private final Paint scanLinePaint = stroke(alpha(G, 30), 0.5f);
+    private final Paint reticlePaint  = stroke(G, 1.5f);
+    private final Paint sweepPaint    = stroke(alpha(G, 75), 2f);
+    private final Paint dotPaint      = fill(G);
 
-    public ScouterOverlayView(Context context, AttributeSet attrs) {
-        super(context, attrs);
-        init();
-    }
+    private final Paint bigPaint   = text(G,             28f, true,  0.04f);
+    private final Paint labelPaint = text(G,             13f, false, 0.10f);
+    private final Paint smallPaint = text(alpha(G, 175), 9.5f, false, 0.16f);
 
-    public ScouterOverlayView(Context context, AttributeSet attrs, int defStyleAttr) {
-        super(context, attrs, defStyleAttr);
-        init();
-    }
+    /* ── state ────────────────────────────────────────────────────── */
+    private HudState hud = HudState.idle(
+            "PRESS TO SCAN", "STANDBY", "Tap glasses or screen", true);
 
-    private void init() {
-        hudPaint.setColor(Color.parseColor("#A6FF78"));
-        hudPaint.setStrokeWidth(2f * density);
-        hudPaint.setStyle(Paint.Style.STROKE);
-        hudPaint.setPathEffect(new CornerPathEffect(6f * density));
+    /* ── constructors ─────────────────────────────────────────────── */
+    public ScouterOverlayView(Context c)                        { super(c); }
+    public ScouterOverlayView(Context c, AttributeSet a)        { super(c, a); }
+    public ScouterOverlayView(Context c, AttributeSet a, int d) { super(c, a, d); }
 
-        amberPaint.setColor(Color.parseColor("#FF9D27"));
-        amberPaint.setStrokeWidth(2f * density);
-        amberPaint.setStyle(Paint.Style.STROKE);
-
-        sweepPaint.setColor(Color.argb(105, 190, 255, 120));
-        sweepPaint.setStrokeWidth(3f * density);
-        sweepPaint.setStyle(Paint.Style.STROKE);
-
-        textPaint.setColor(Color.parseColor("#DAFF9C"));
-        textPaint.setTextSize(14f * density);
-        textPaint.setLetterSpacing(0.12f);
-
-        headlinePaint.setColor(Color.parseColor("#FFB648"));
-        headlinePaint.setTextSize(20f * density);
-        headlinePaint.setFakeBoldText(true);
-        headlinePaint.setLetterSpacing(0.10f);
-
-        smallPaint.setColor(Color.parseColor("#92F56A"));
-        smallPaint.setTextSize(10f * density);
-        smallPaint.setLetterSpacing(0.16f);
-
-        solidPaint.setColor(Color.parseColor("#B4FF7E"));
-        solidPaint.setStyle(Paint.Style.FILL);
-    }
-
+    /* ── public API ───────────────────────────────────────────────── */
     public void render(HudState state) {
-        hudState = state;
-        if (state.scanActive) {
-            postInvalidateOnAnimation();
-        } else {
-            invalidate();
-        }
+        hud = state;
+        if (state.scanActive) postInvalidateOnAnimation(); else invalidate();
     }
 
+    /* ══════════════════════════════════════════════════════════════ *
+     *  DRAW                                                         *
+     * ══════════════════════════════════════════════════════════════ */
     @Override
-    protected void onDraw(Canvas canvas) {
-        super.onDraw(canvas);
-
+    protected void onDraw(Canvas c) {
+        super.onDraw(c);
         long now = SystemClock.elapsedRealtime();
-        if (hudState.opaqueBackground) {
-            canvas.drawColor(Color.BLACK);
-        }
-        drawFrame(canvas);
+        if (hud.opaqueBackground) c.drawColor(Color.BLACK);
 
-        if (hudState.scanActive) {
-            drawSweep(canvas, now);
-            drawStatusPanel(canvas);
-            drawTargetLock(canvas, now);
+        drawScanLines(c);
+        drawScouterFrame(c);
+
+        if (hud.scanActive) {
+            drawSweep(c, now);
+            drawStatus(c);
+            drawPower(c);
+            drawReticle(c, now);
+            drawFooter(c);
             postInvalidateOnAnimation();
         } else {
-            drawIdlePrompt(canvas);
+            drawIdle(c);
         }
     }
 
-    private void drawFrame(Canvas canvas) {
-        float pad = 18f * density;
-        float arm = 26f * density;
-
-        canvas.drawLine(pad, pad, pad + arm, pad, hudPaint);
-        canvas.drawLine(pad, pad, pad, pad + arm, hudPaint);
-
-        canvas.drawLine(getWidth() - pad, pad, getWidth() - pad - arm, pad, hudPaint);
-        canvas.drawLine(getWidth() - pad, pad, getWidth() - pad, pad + arm, hudPaint);
-
-        canvas.drawLine(pad, getHeight() - pad, pad + arm, getHeight() - pad, hudPaint);
-        canvas.drawLine(pad, getHeight() - pad, pad, getHeight() - pad - arm, hudPaint);
-
-        canvas.drawLine(getWidth() - pad, getHeight() - pad, getWidth() - pad - arm, getHeight() - pad, hudPaint);
-        canvas.drawLine(getWidth() - pad, getHeight() - pad, getWidth() - pad, getHeight() - pad - arm, hudPaint);
+    /* ── background CRT scan lines ────────────────────────────────── */
+    private void drawScanLines(Canvas c) {
+        float step = 6f * dp, w = getWidth();
+        for (float y = 0; y < getHeight(); y += step)
+            c.drawLine(0, y, w, y, scanLinePaint);
     }
 
-    private void drawSweep(Canvas canvas, long now) {
-        float progress = (now % 2200L) / 2200f;
-        float y = progress * getHeight();
+    /* ── scouter lens frame ───────────────────────────────────────── */
+    private void drawScouterFrame(Canvas c) {
+        float w = getWidth(), h = getHeight();
 
-        canvas.drawLine(0f, y, getWidth(), y, sweepPaint);
+        /* corner brackets */
+        float p = 12f * dp, a = 18f * dp;
+        corner(c, p,     p,     a,  1,  1);
+        corner(c, w - p, p,     a, -1,  1);
+        corner(c, p,     h - p, a,  1, -1);
+        corner(c, w - p, h - p, a, -1, -1);
     }
 
-    private void drawIdlePrompt(Canvas canvas) {
-        float centerX = getWidth() / 2f;
-        float centerY = getHeight() / 2f;
-
-        float lensWidth = smallPaint.measureText(hudState.lensLabel);
-        canvas.drawText(hudState.lensLabel, centerX - (lensWidth / 2f), centerY - (28f * density), smallPaint);
-
-        float titleWidth = headlinePaint.measureText(hudState.statusLabel);
-        canvas.drawText(hudState.statusLabel, centerX - (titleWidth / 2f), centerY, headlinePaint);
-
-        if (hudState.promptLabel != null) {
-            float promptWidth = textPaint.measureText(hudState.promptLabel);
-            canvas.drawText(
-                    hudState.promptLabel,
-                    centerX - (promptWidth / 2f),
-                    centerY + (28f * density),
-                    textPaint
-            );
-        }
-
-        float lineWidth = 28f * density;
-        float lineY = centerY + (48f * density);
-        canvas.drawLine(centerX - lineWidth, lineY, centerX - (8f * density), lineY, amberPaint);
-        canvas.drawLine(centerX + (8f * density), lineY, centerX + lineWidth, lineY, amberPaint);
+    /* ── sweep animation ──────────────────────────────────────────── */
+    private void drawSweep(Canvas c, long now) {
+        float y = ((now % 2400L) / 2400f) * getHeight();
+        c.drawLine(0, y, getWidth(), y, sweepPaint);
     }
 
-    private void drawStatusPanel(Canvas canvas) {
-        float left = 24f * density;
-        float top = 38f * density;
-        float rightPanelLeft = getWidth() - 148f * density;
-        float bottom = getHeight() - 30f * density;
+    /* ── top-left status block ────────────────────────────────────── */
+    private void drawStatus(Canvas c) {
+        float x = 18f * dp, y = 32f * dp;
+        c.drawText(hud.statusLabel, x, y, labelPaint);
+        c.drawText(hud.lensLabel,   x, y + 17f * dp, smallPaint);
+        if (hud.modeLabel != null)
+            c.drawText(hud.modeLabel, x, y + 30f * dp, smallPaint);
+    }
 
-        canvas.drawText(hudState.statusLabel, left, top, headlinePaint);
-        canvas.drawText(hudState.lensLabel, left, top + 22f * density, smallPaint);
-        String modeLabel = hudState.modeLabel != null ? hudState.modeLabel : "MODE: SCOUTER";
-        canvas.drawText(modeLabel, left, top + 40f * density, smallPaint);
+    /* ── top-right power level ────────────────────────────────────── */
+    private void drawPower(Canvas c) {
+        float rx = getWidth() - 18f * dp, ty = 30f * dp;
 
-        float panelTop = 54f * density;
-        float panelBottom = 148f * density;
-        float panelRight = getWidth() - 22f * density;
-        RectF panelRect = new RectF(rightPanelLeft, panelTop, panelRight, panelBottom);
-        canvas.drawRoundRect(panelRect, 14f * density, 14f * density, amberPaint);
-
-        canvas.drawText("BATTLE POWER", panelRect.left + 14f * density, panelTop + 22f * density, smallPaint);
-        String powerLabel = hudState.powerLevel != null
-                ? String.format(Locale.getDefault(), "%,d", hudState.powerLevel)
+        String bp  = "BATTLE POWER";
+        String num = hud.powerLevel != null
+                ? String.format(Locale.getDefault(), "%,d", hud.powerLevel)
                 : "----";
-        canvas.drawText(powerLabel, panelRect.left + 14f * density, panelTop + 52f * density, headlinePaint);
-
-        String targetLabel = hudState.targetId != null
-                ? "TARGET-" + Math.max(1, hudState.targetId)
+        String tgt = hud.targetId != null
+                ? "TGT-" + Math.max(1, hud.targetId)
                 : "NO TARGET";
-        canvas.drawText(targetLabel, panelRect.left + 14f * density, panelTop + 74f * density, textPaint);
 
-        if (hudState.overNineThousand) {
-            canvas.drawText("IT'S OVER 9000", left, bottom, headlinePaint);
-        } else {
-            String footerLabel = hudState.promptLabel != null ? hudState.promptLabel : "SCOUTER LINK STABLE";
-            canvas.drawText(footerLabel, left, bottom, smallPaint);
+        c.drawText(bp,  rx - smallPaint.measureText(bp),  ty,             smallPaint);
+        c.drawText(num, rx - bigPaint.measureText(num),    ty + 32f * dp, bigPaint);
+        c.drawText(tgt, rx - smallPaint.measureText(tgt),  ty + 48f * dp, smallPaint);
+
+        float lw = Math.max(bigPaint.measureText(num), smallPaint.measureText(bp));
+        c.drawLine(rx - lw, ty + 54f * dp, rx, ty + 54f * dp, arcPaint);
+    }
+
+    /* ── bottom footer ────────────────────────────────────────────── */
+    private void drawFooter(Canvas c) {
+        float x = 18f * dp, y = getHeight() - 18f * dp;
+        if (hud.overNineThousand) {
+            c.drawText("IT'S OVER 9000!", x, y, labelPaint);
+        } else if (hud.promptLabel != null) {
+            c.drawText(hud.promptLabel, x, y, smallPaint);
         }
     }
 
-    private void drawTargetLock(Canvas canvas, long now) {
-        float centerX;
-        float centerY;
-        float radius;
+    /* ── target reticle (anime crosshair) ─────────────────────────── */
+    private void drawReticle(Canvas c, long now) {
+        float cx, cy, r;
 
-        if (hudState.lockCenterX != null && hudState.lockCenterY != null) {
-            centerX = hudState.lockCenterX;
-            centerY = hudState.lockCenterY;
+        if (hud.lockCenterX != null && hud.lockCenterY != null) {
+            cx = hud.lockCenterX;
+            cy = hud.lockCenterY;
             float base = Math.min(getWidth(), getHeight());
-            float lockScale = hudState.lockScale != null ? hudState.lockScale : 0.18f;
-            radius = Math.max(42f * density, base * lockScale);
+            float ls = hud.lockScale != null ? hud.lockScale : 0.18f;
+            r = Math.max(40f * dp, base * ls);
         } else {
-            if (hudState.targetRect == null) {
-                return;
-            }
-
-            RectF mapped = mapToView(hudState.targetRect, hudState.imageWidth, hudState.imageHeight);
-            if (mapped == null) {
-                return;
-            }
-
-            centerX = mapped.centerX();
-            centerY = mapped.centerY() - mapped.height() * 0.10f;
-            radius = Math.max(mapped.width(), mapped.height()) * 0.42f;
+            if (hud.targetRect == null) return;
+            RectF m = mapToView(hud.targetRect, hud.imageWidth, hud.imageHeight);
+            if (m == null) return;
+            cx = m.centerX();
+            cy = m.centerY() - m.height() * 0.1f;
+            r = Math.max(m.width(), m.height()) * 0.42f;
         }
 
-        if (hudState.predictiveLock) {
-            radius *= 1.08f;
+        if (hud.predictiveLock) r *= 1.06f;
+        float pulse = 1f + ((now % 1100L) / 1100f)
+                * (hud.predictiveLock ? 0.02f : 0.05f);
+        float pr = r * pulse;
+
+        /* circles */
+        c.drawCircle(cx, cy, pr,         reticlePaint);
+        c.drawCircle(cx, cy, pr * 0.45f, arcPaint);
+        c.drawCircle(cx, cy, 3f * dp,    dotPaint);
+
+        /* crosshair lines — gap near centre, extending past circle */
+        float gap = 8f * dp, ext = pr + 16f * dp;
+        c.drawLine(cx,       cy - gap, cx,       cy - ext, reticlePaint);
+        c.drawLine(cx,       cy + gap, cx,       cy + ext, reticlePaint);
+        c.drawLine(cx - gap, cy,       cx - ext, cy,       reticlePaint);
+        c.drawLine(cx + gap, cy,       cx + ext, cy,       reticlePaint);
+
+        /* diagonal ticks on main circle */
+        float ti = pr - 4f * dp, to = pr + 4f * dp;
+        for (int d = 45; d < 360; d += 90) {
+            float rad = (float) Math.toRadians(d);
+            float cos = (float) Math.cos(rad), sin = (float) Math.sin(rad);
+            c.drawLine(cx + ti * cos, cy + ti * sin,
+                    cx + to * cos, cy + to * sin, arcPaint);
         }
 
-        float pulseRange = hudState.predictiveLock ? 0.03f : 0.08f;
-        float pulse = 1f + (((now % 900L) / 900f) * pulseRange);
+        /* square brackets */
+        float bk = pr * 1.25f, arm = 10f * dp;
+        corner(c, cx - bk, cy - bk, arm,  1,  1);
+        corner(c, cx + bk, cy - bk, arm, -1,  1);
+        corner(c, cx - bk, cy + bk, arm,  1, -1);
+        corner(c, cx + bk, cy + bk, arm, -1, -1);
 
-        canvas.drawCircle(centerX, centerY, radius * pulse, amberPaint);
-        canvas.drawCircle(centerX, centerY, radius * 0.72f, hudPaint);
-        canvas.drawCircle(centerX, centerY, 4f * density, solidPaint);
+        /* data-readout ticks beside the reticle */
+        float dtX = cx + pr * 1.4f;
+        float dtY = cy - 12f * dp;
+        for (int i = 0; i < 4; i++) {
+            float tw = (i == 1) ? 14f * dp : 8f * dp;
+            c.drawLine(dtX, dtY + i * 7f * dp,
+                    dtX + tw, dtY + i * 7f * dp, arcPaint);
+        }
 
-        float bracket = radius * 1.25f;
-        float arm = 12f * density;
-
-        canvas.drawLine(centerX - bracket, centerY - bracket, centerX - bracket + arm, centerY - bracket, hudPaint);
-        canvas.drawLine(centerX - bracket, centerY - bracket, centerX - bracket, centerY - bracket + arm, hudPaint);
-
-        canvas.drawLine(centerX + bracket, centerY - bracket, centerX + bracket - arm, centerY - bracket, hudPaint);
-        canvas.drawLine(centerX + bracket, centerY - bracket, centerX + bracket, centerY - bracket + arm, hudPaint);
-
-        canvas.drawLine(centerX - bracket, centerY + bracket, centerX - bracket + arm, centerY + bracket, hudPaint);
-        canvas.drawLine(centerX - bracket, centerY + bracket, centerX - bracket, centerY + bracket - arm, hudPaint);
-
-        canvas.drawLine(centerX + bracket, centerY + bracket, centerX + bracket - arm, centerY + bracket, hudPaint);
-        canvas.drawLine(centerX + bracket, centerY + bracket, centerX + bracket, centerY + bracket - arm, hudPaint);
-
-        float labelY = centerY - radius - 12f * density;
-        String lockLabel = hudState.predictiveLock ? "HOLD" : "LOCK";
-        canvas.drawText(lockLabel, centerX - 18f * density, labelY, smallPaint);
+        /* label */
+        String lbl = hud.predictiveLock ? "HOLD" : "LOCK";
+        centred(c, lbl, cx, cy - pr - 12f * dp, smallPaint);
     }
 
-    private RectF mapToView(RectF rect, int imageWidth, int imageHeight) {
-        if (getWidth() == 0 || getHeight() == 0 || imageWidth <= 0 || imageHeight <= 0) {
-            return null;
-        }
+    /* ── idle / standby screen ────────────────────────────────────── */
+    private void drawIdle(Canvas c) {
+        float cx = getWidth() / 2f;
+        float cy = getHeight() * 0.42f;
 
-        float scale = Math.max(getWidth() / (float) imageWidth, getHeight() / (float) imageHeight);
-        float scaledWidth = imageWidth * scale;
-        float scaledHeight = imageHeight * scale;
-        float dx = (getWidth() - scaledWidth) / 2f;
-        float dy = (getHeight() - scaledHeight) / 2f;
+        /* dormant crosshair */
+        c.drawCircle(cx, cy, 50f * dp, arcPaint);
+        float ch = 12f * dp;
+        c.drawLine(cx - ch, cy, cx + ch, cy, framePaint);
+        c.drawLine(cx, cy - ch, cx, cy + ch, framePaint);
+        c.drawCircle(cx, cy, 2.5f * dp, dotPaint);
 
-        return new RectF(
-                rect.left * scale + dx,
-                rect.top * scale + dy,
-                rect.right * scale + dx,
-                rect.bottom * scale + dy
-        );
+        /* labels */
+        centred(c, hud.lensLabel,   cx, cy - 62f * dp, smallPaint);
+        centred(c, hud.statusLabel, cx, cy + 76f * dp, bigPaint);
+        if (hud.promptLabel != null)
+            centred(c, hud.promptLabel, cx, cy + 96f * dp, smallPaint);
+    }
+
+    /* ═══════════ drawing helpers ═══════════ */
+
+    private void corner(Canvas c, float x, float y, float a, int dx, int dy) {
+        c.drawLine(x, y, x + a * dx, y, framePaint);
+        c.drawLine(x, y, x, y + a * dy, framePaint);
+    }
+
+    private void tick(Canvas c, float cx, float cy, float r,
+                      int deg, float half, Paint p) {
+        float rad = (float) Math.toRadians(deg);
+        float cos = (float) Math.cos(rad), sin = (float) Math.sin(rad);
+        c.drawLine(cx + (r - half) * cos, cy + (r - half) * sin,
+                cx + (r + half) * cos, cy + (r + half) * sin, p);
+    }
+
+    private void centred(Canvas c, String t, float cx, float y, Paint p) {
+        c.drawText(t, cx - p.measureText(t) / 2f, y, p);
+    }
+
+    private static RectF oval(float cx, float cy, float r) {
+        return new RectF(cx - r, cy - r, cx + r, cy + r);
+    }
+
+    private RectF mapToView(RectF rect, int iw, int ih) {
+        if (getWidth() == 0 || getHeight() == 0 || iw <= 0 || ih <= 0) return null;
+        float s = Math.max(getWidth() / (float) iw, getHeight() / (float) ih);
+        float dx = (getWidth() - iw * s) / 2f, dy = (getHeight() - ih * s) / 2f;
+        return new RectF(rect.left * s + dx, rect.top * s + dy,
+                rect.right * s + dx, rect.bottom * s + dy);
+    }
+
+    /* ═══════════ paint factories ═══════════ */
+
+    private Paint stroke(int color, float wDp) {
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setColor(color);
+        p.setStrokeWidth(wDp * dp);
+        p.setStyle(Paint.Style.STROKE);
+        return p;
+    }
+
+    private Paint fill(int color) {
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setColor(color);
+        p.setStyle(Paint.Style.FILL);
+        return p;
+    }
+
+    private Paint text(int color, float sp, boolean bold, float spacing) {
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setColor(color);
+        p.setTextSize(sp * dp);
+        p.setFakeBoldText(bold);
+        p.setLetterSpacing(spacing);
+        return p;
+    }
+
+    private static int alpha(int color, int a) {
+        return (color & 0x00FFFFFF) | (a << 24);
     }
 }

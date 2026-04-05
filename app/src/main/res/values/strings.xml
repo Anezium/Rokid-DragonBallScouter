@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">DragonBall HUD</string>
+    <string name="app_name">DragonBall Scouter</string>
     <string name="status_press_to_scan">PRESS TO SCAN</string>
     <string name="status_scanning">SCANNING...</string>
     <string name="status_retrying">SCAN RETRYING</string>
