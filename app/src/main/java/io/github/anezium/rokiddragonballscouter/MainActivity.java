@@ -66,6 +66,7 @@ public class MainActivity extends AppCompatActivity {
     private static final long SENSOR_RENDER_INTERVAL_MS = 33L;
     private static final long POWER_PROFILE_RETENTION_MS = 30_000L;
     private static final long POWER_PROFILE_MATCH_WINDOW_MS = 2_000L;
+    private static final float REVEAL_SOUND_VOLUME = 0.35f;
 
     private static final float DEFAULT_SENSOR_HORIZONTAL_FOV_RAD = (float) Math.toRadians(68.0);
     private static final float DEFAULT_SENSOR_VERTICAL_FOV_RAD = (float) Math.toRadians(52.0);
@@ -826,6 +827,7 @@ public class MainActivity extends AppCompatActivity {
         if (revealSoundPlayer == null) {
             return;
         }
+        revealSoundPlayer.setVolume(REVEAL_SOUND_VOLUME, REVEAL_SOUND_VOLUME);
         revealSoundPlayer.setOnCompletionListener(player -> {
             player.release();
             if (revealSoundPlayer == player) {
