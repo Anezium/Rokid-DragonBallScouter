@@ -187,7 +187,7 @@ public class ScouterOverlayView extends View {
 
         canvas.drawText(hudState.statusLabel, left, top, headlinePaint);
         canvas.drawText(hudState.lensLabel, left, top + 22f * density, smallPaint);
-        canvas.drawText("MODE: LOCAL LOCK", left, top + 40f * density, smallPaint);
+        canvas.drawText("MODE: ANGULAR LOCK", left, top + 40f * density, smallPaint);
 
         float panelTop = 54f * density;
         float panelBottom = 148f * density;
@@ -209,24 +209,43 @@ public class ScouterOverlayView extends View {
         if (hudState.overNineThousand) {
             canvas.drawText("IT'S OVER 9000", left, bottom, headlinePaint);
         } else {
-            canvas.drawText("SCOUTER LINK STABLE", left, bottom, smallPaint);
+            String footerLabel = hudState.promptLabel != null ? hudState.promptLabel : "SCOUTER LINK STABLE";
+            canvas.drawText(footerLabel, left, bottom, smallPaint);
         }
     }
 
     private void drawTargetLock(Canvas canvas, long now) {
-        if (hudState.targetRect == null) {
-            return;
+        float centerX;
+        float centerY;
+        float radius;
+
+        if (hudState.lockCenterX != null && hudState.lockCenterY != null) {
+            centerX = hudState.lockCenterX;
+            centerY = hudState.lockCenterY;
+            float base = Math.min(getWidth(), getHeight());
+            float lockScale = hudState.lockScale != null ? hudState.lockScale : 0.18f;
+            radius = Math.max(42f * density, base * lockScale);
+        } else {
+            if (hudState.targetRect == null) {
+                return;
+            }
+
+            RectF mapped = mapToView(hudState.targetRect, hudState.imageWidth, hudState.imageHeight);
+            if (mapped == null) {
+                return;
+            }
+
+            centerX = mapped.centerX();
+            centerY = mapped.centerY() - mapped.height() * 0.10f;
+            radius = Math.max(mapped.width(), mapped.height()) * 0.42f;
         }
 
-        RectF mapped = mapToView(hudState.targetRect, hudState.imageWidth, hudState.imageHeight);
-        if (mapped == null) {
-            return;
+        if (hudState.predictiveLock) {
+            radius *= 1.08f;
         }
 
-        float centerX = mapped.centerX();
-        float centerY = mapped.centerY() - mapped.height() * 0.10f;
-        float radius = Math.max(mapped.width(), mapped.height()) * 0.42f;
-        float pulse = 1f + (((now % 900L) / 900f) * 0.08f);
+        float pulseRange = hudState.predictiveLock ? 0.03f : 0.08f;
+        float pulse = 1f + (((now % 900L) / 900f) * pulseRange);
 
         canvas.drawCircle(centerX, centerY, radius * pulse, amberPaint);
         canvas.drawCircle(centerX, centerY, radius * 0.72f, hudPaint);
@@ -248,7 +267,8 @@ public class ScouterOverlayView extends View {
         canvas.drawLine(centerX + bracket, centerY + bracket, centerX + bracket, centerY + bracket - arm, hudPaint);
 
         float labelY = centerY - radius - 12f * density;
-        canvas.drawText("LOCK", centerX - 18f * density, labelY, smallPaint);
+        String lockLabel = hudState.predictiveLock ? "HOLD" : "LOCK";
+        canvas.drawText(lockLabel, centerX - 18f * density, labelY, smallPaint);
     }
 
     private RectF mapToView(RectF rect, int imageWidth, int imageHeight) {

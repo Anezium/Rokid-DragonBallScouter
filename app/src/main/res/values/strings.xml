@@ -7,8 +7,11 @@
     <string name="status_permission">CAMERA REQUIRED</string>
     <string name="status_camera_error">CAMERA ERROR</string>
     <string name="status_target_lock">TARGET LOCK</string>
+    <string name="status_track_hold">TRACK HOLD</string>
+    <string name="status_recentered">HUD RECENTERED</string>
     <string name="status_over_9000">IT\'S OVER 9000</string>
     <string name="prompt_tap_to_scan">Tap glasses or screen</string>
+    <string name="prompt_tap_to_recenter">Tap again to recenter</string>
     <string name="prompt_permission">Grant camera permission to scan</string>
     <string name="lens_standby">STANDBY</string>
     <string name="lens_booting">ARMING SCOUTER</string>
