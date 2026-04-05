@@ -15,8 +15,6 @@ import java.util.Locale;
 public class ScouterOverlayView extends View {
     private final float density = getResources().getDisplayMetrics().density;
 
-    private final Paint tintPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint gridPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint hudPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint amberPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint sweepPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -43,13 +41,6 @@ public class ScouterOverlayView extends View {
     }
 
     private void init() {
-        tintPaint.setColor(Color.argb(26, 86, 255, 124));
-        tintPaint.setStyle(Paint.Style.FILL);
-
-        gridPaint.setColor(Color.argb(42, 120, 255, 150));
-        gridPaint.setStrokeWidth(density);
-        gridPaint.setStyle(Paint.Style.STROKE);
-
         hudPaint.setColor(Color.parseColor("#A6FF78"));
         hudPaint.setStrokeWidth(2f * density);
         hudPaint.setStyle(Paint.Style.STROKE);
@@ -94,8 +85,6 @@ public class ScouterOverlayView extends View {
         super.onDraw(canvas);
 
         long now = SystemClock.elapsedRealtime();
-        drawTint(canvas);
-        drawGrid(canvas);
         drawFrame(canvas);
 
         if (hudState.scanActive) {
@@ -105,27 +94,6 @@ public class ScouterOverlayView extends View {
             postInvalidateOnAnimation();
         } else {
             drawIdlePrompt(canvas);
-        }
-    }
-
-    private void drawTint(Canvas canvas) {
-        canvas.drawRect(0f, 0f, getWidth(), getHeight(), tintPaint);
-    }
-
-    private void drawGrid(Canvas canvas) {
-        int columns = 6;
-        int rows = 10;
-        float cellWidth = getWidth() / (float) columns;
-        float cellHeight = getHeight() / (float) rows;
-
-        for (int column = 1; column < columns; column++) {
-            float x = column * cellWidth;
-            canvas.drawLine(x, 0f, x, getHeight(), gridPaint);
-        }
-
-        for (int row = 1; row < rows; row++) {
-            float y = row * cellHeight;
-            canvas.drawLine(0f, y, getWidth(), y, gridPaint);
         }
     }
 
