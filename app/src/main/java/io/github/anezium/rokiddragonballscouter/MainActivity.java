@@ -474,7 +474,6 @@ public class MainActivity extends AppCompatActivity {
         updateActiveFovForImage(imageWidth, imageHeight);
 
         if (faces.isEmpty()) {
-            stopRevealSound();
             if (hasRenderableTarget(now)) {
                 renderTrackedHud(now);
             } else {
