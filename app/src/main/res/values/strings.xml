@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DragonBall HUD</string>
+    <string name="status_press_to_scan">PRESS TO SCAN</string>
+    <string name="status_scanning">SCANNING...</string>
+    <string name="status_retrying">SCAN RETRYING</string>
+    <string name="status_permission">CAMERA REQUIRED</string>
+    <string name="status_camera_error">CAMERA ERROR</string>
+    <string name="status_target_lock">TARGET LOCK</string>
+    <string name="status_over_9000">IT\'S OVER 9000</string>
+    <string name="prompt_tap_to_scan">Tap glasses or screen</string>
+    <string name="prompt_permission">Grant camera permission to scan</string>
+    <string name="lens_standby">STANDBY</string>
+    <string name="lens_booting">ARMING SCOUTER</string>
+</resources>

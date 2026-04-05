@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="scouter_black">#020403</color>
+    <color name="scouter_green">#8EFF67</color>
+    <color name="scouter_green_soft">#DFFF8A</color>
+    <color name="scouter_orange">#FF9F2A</color>
+    <color name="scouter_warning">#FF6B2F</color>
+</resources>
