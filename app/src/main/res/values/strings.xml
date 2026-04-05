@@ -9,24 +9,17 @@
     <string name="status_target_lock">TARGET LOCK</string>
     <string name="status_track_hold">TRACK HOLD</string>
     <string name="status_recentered">HUD RECENTERED</string>
-    <string name="status_calibration_waiting">NO FACE DETECTED</string>
-    <string name="status_calibration_align">CENTER TARGET</string>
-    <string name="status_calibration_ready">READY TO SAVE</string>
-    <string name="status_calibration_saved">CALIBRATION SAVED</string>
     <string name="status_over_9000">IT\'S OVER 9000</string>
     <string name="prompt_tap_to_scan">Tap glasses or screen</string>
     <string name="prompt_tap_scan_swipe_mode">Tap to scan / swipe mode</string>
     <string name="prompt_tap_to_recenter">Tap again to recenter</string>
     <string name="prompt_tap_recenter_swipe_mode">Tap recenter / swipe mode</string>
     <string name="prompt_swipe_mode">Swipe to change mode</string>
-    <string name="prompt_calibration_center_tap">Center face and tap to save</string>
     <string name="prompt_permission">Grant camera permission to scan</string>
     <string name="lens_standby">STANDBY</string>
     <string name="lens_booting">ARMING SCOUTER</string>
     <string name="lens_hud_ready">HUD READY</string>
     <string name="lens_live_ready">LIVE CAM READY</string>
-    <string name="lens_calibration_ready">CAL READY</string>
     <string name="mode_angular_lock">MODE: ANGULAR LOCK</string>
     <string name="mode_live_lock">MODE: LIVE CAM LOCK</string>
-    <string name="mode_calibration">MODE: CALIBRATION</string>
 </resources>

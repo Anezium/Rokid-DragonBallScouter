@@ -68,11 +68,6 @@ public class MainActivity extends AppCompatActivity {
     private static final float DISPLAY_MARGIN_RATIO = 0.10f;
     private static final float MODE_SWIPE_DISTANCE_DP = 42f;
     private static final float MODE_SWIPE_DOMINANCE = 1.35f;
-    private static final long CALIBRATION_FACE_FRESH_MS = 250L;
-    private static final float CALIBRATION_READY_THRESHOLD_RAD = (float) Math.toRadians(4.0);
-    private static final String PREFS_CALIBRATION = "scouter_calibration";
-    private static final String PREF_CALIBRATION_YAW = "calibration_yaw";
-    private static final String PREF_CALIBRATION_PITCH = "calibration_pitch";
 
     private PreviewView previewView;
     private ScouterOverlayView hudView;
@@ -145,8 +140,6 @@ public class MainActivity extends AppCompatActivity {
     private float currentHeadPitchAbsRad = 0f;
     private float headReferenceYawAbsRad = 0f;
     private float headReferencePitchAbsRad = 0f;
-    private float calibrationYawOffsetRad = 0f;
-    private float calibrationPitchOffsetRad = 0f;
     private float displayYawOffsetRad = 0f;
     private float displayPitchOffsetRad = 0f;
     private float lastCameraYawRad = 0f;
@@ -190,7 +183,6 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
         previewView = findViewById(R.id.previewView);
         hudView = findViewById(R.id.hudView);
-        loadCalibrationOffsets();
 
         previewView.setBackgroundColor(Color.BLACK);
         hudView.setBackgroundColor(Color.TRANSPARENT);
@@ -253,9 +245,7 @@ public class MainActivity extends AppCompatActivity {
     private void onPrimaryAction() {
         if (scanSessionActive) {
             restartScanTimeout();
-            if (displayMode == DisplayMode.CALIBRATION) {
-                saveCalibrationFromCurrentTarget();
-            } else if (displayMode == DisplayMode.ANGULAR_HUD) {
+            if (displayMode == DisplayMode.ANGULAR_HUD) {
                 recenterProjection();
             }
         } else {
@@ -335,7 +325,7 @@ public class MainActivity extends AppCompatActivity {
         updateDisplayModePresentation();
 
         Preview preview = null;
-        if (displayMode == DisplayMode.LIVE_CAMERA || displayMode == DisplayMode.CALIBRATION) {
+        if (displayMode == DisplayMode.LIVE_CAMERA) {
             preview = new Preview.Builder()
                     .setTargetRotation(previewView.getDisplay() != null
                             ? previewView.getDisplay().getRotation()
@@ -449,7 +439,7 @@ public class MainActivity extends AppCompatActivity {
                         }
 
                         long now = SystemClock.elapsedRealtime();
-                        if (shouldRenderHudDuringScan(now)) {
+                        if (hasRenderableTarget(now)) {
                             renderTrackedHud(now);
                         } else if (now - lastFaceSeenAt > LOST_TARGET_GRACE_MS) {
                             renderScanningState(getString(R.string.status_retrying), activeLensLabel);
@@ -471,7 +461,7 @@ public class MainActivity extends AppCompatActivity {
         updateActiveFovForImage(imageWidth, imageHeight);
 
         if (faces.isEmpty()) {
-            if (shouldRenderHudDuringScan(now)) {
+            if (hasRenderableTarget(now)) {
                 renderTrackedHud(now);
             } else {
                 clearTrackedTarget();
@@ -520,45 +510,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void renderTrackedHud(long now) {
-        if (displayMode == DisplayMode.CALIBRATION) {
-            renderCalibrationHud(now);
-        } else if (displayMode == DisplayMode.LIVE_CAMERA) {
+        if (displayMode == DisplayMode.LIVE_CAMERA) {
             renderLiveTrackedHud(now);
         } else {
             renderAngularTrackedHud(now);
         }
-    }
-
-    private void renderCalibrationHud(long now) {
-        boolean faceFresh = now - lastFaceSeenAt <= CALIBRATION_FACE_FRESH_MS && lastTargetRect != null;
-        boolean centered = faceFresh
-                && Math.abs(lastCameraYawRad) <= CALIBRATION_READY_THRESHOLD_RAD
-                && Math.abs(lastCameraPitchRad) <= CALIBRATION_READY_THRESHOLD_RAD;
-        String statusLabel;
-        if (!faceFresh) {
-            statusLabel = getString(R.string.status_calibration_waiting);
-        } else if (centered) {
-            statusLabel = getString(R.string.status_calibration_ready);
-        } else {
-            statusLabel = getString(R.string.status_calibration_align);
-        }
-
-        int hudWidth = hudView.getWidth() > 0 ? hudView.getWidth() : 480;
-        int hudHeight = hudView.getHeight() > 0 ? hudView.getHeight() : 640;
-        hudView.render(HudState.activeAngular(
-                statusLabel,
-                activeLensLabel,
-                null,
-                null,
-                false,
-                hudWidth / 2f,
-                hudHeight / 2f,
-                0.18f,
-                !centered,
-                getString(R.string.prompt_calibration_center_tap),
-                getModeLabel(),
-                false
-        ));
     }
 
     private void renderAngularTrackedHud(long now) {
@@ -625,12 +581,8 @@ public class MainActivity extends AppCompatActivity {
         int hudWidth = hudView.getWidth() > 0 ? hudView.getWidth() : 480;
         int hudHeight = hudView.getHeight() > 0 ? hudView.getHeight() : 640;
 
-        float relativeYawRad = normalizeAngle(lastTargetWorldYawRad - getRelativeHeadYaw())
-                + calibrationYawOffsetRad
-                + displayYawOffsetRad;
-        float relativePitchRad = normalizeAngle(lastTargetWorldPitchRad - getRelativeHeadPitch())
-                + calibrationPitchOffsetRad
-                + displayPitchOffsetRad;
+        float relativeYawRad = normalizeAngle(lastTargetWorldYawRad - getRelativeHeadYaw()) + displayYawOffsetRad;
+        float relativePitchRad = normalizeAngle(lastTargetWorldPitchRad - getRelativeHeadPitch()) + displayPitchOffsetRad;
 
         float halfWidth = hudWidth / 2f;
         float halfHeight = hudHeight / 2f;
@@ -663,8 +615,8 @@ public class MainActivity extends AppCompatActivity {
         }
 
         if (canProjectTarget(now)) {
-            displayYawOffsetRad = -(lastCameraYawRad + calibrationYawOffsetRad);
-            displayPitchOffsetRad = -(lastCameraPitchRad + calibrationPitchOffsetRad);
+            displayYawOffsetRad = -lastCameraYawRad;
+            displayPitchOffsetRad = -lastCameraPitchRad;
             lastTargetWorldYawRad = lastCameraYawRad;
             lastTargetWorldPitchRad = lastCameraPitchRad;
             renderTrackedHud(now);
@@ -793,10 +745,6 @@ public class MainActivity extends AppCompatActivity {
                 : canProjectTarget(now);
     }
 
-    private boolean shouldRenderHudDuringScan(long now) {
-        return displayMode == DisplayMode.CALIBRATION || hasRenderableTarget(now);
-    }
-
     private void clearTrackedTarget() {
         currentTargetId = null;
         lastTargetWorldYawRad = Float.NaN;
@@ -818,42 +766,6 @@ public class MainActivity extends AppCompatActivity {
             value += (float) (Math.PI * 2d);
         }
         return value;
-    }
-
-    private void loadCalibrationOffsets() {
-        calibrationYawOffsetRad = getSharedPreferences(PREFS_CALIBRATION, MODE_PRIVATE)
-                .getFloat(PREF_CALIBRATION_YAW, 0f);
-        calibrationPitchOffsetRad = getSharedPreferences(PREFS_CALIBRATION, MODE_PRIVATE)
-                .getFloat(PREF_CALIBRATION_PITCH, 0f);
-    }
-
-    private void saveCalibrationOffsets() {
-        getSharedPreferences(PREFS_CALIBRATION, MODE_PRIVATE)
-                .edit()
-                .putFloat(PREF_CALIBRATION_YAW, calibrationYawOffsetRad)
-                .putFloat(PREF_CALIBRATION_PITCH, calibrationPitchOffsetRad)
-                .apply();
-    }
-
-    private void saveCalibrationFromCurrentTarget() {
-        long now = SystemClock.elapsedRealtime();
-        if (now - lastFaceSeenAt > CALIBRATION_FACE_FRESH_MS || lastTargetRect == null) {
-            renderCalibrationHud(now);
-            return;
-        }
-
-        calibrationYawOffsetRad = -lastCameraYawRad;
-        calibrationPitchOffsetRad = -lastCameraPitchRad;
-        displayYawOffsetRad = 0f;
-        displayPitchOffsetRad = 0f;
-        saveCalibrationOffsets();
-
-        displayMode = DisplayMode.ANGULAR_HUD;
-        updateDisplayModePresentation();
-        if (hasHeadPose) {
-            captureHeadReference();
-        }
-        renderScanningState(getString(R.string.status_calibration_saved), activeLensLabel);
     }
 
     private void stopScanSession() {
@@ -937,18 +849,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void cycleDisplayMode() {
-        switch (displayMode) {
-            case ANGULAR_HUD:
-                displayMode = DisplayMode.LIVE_CAMERA;
-                break;
-            case LIVE_CAMERA:
-                displayMode = DisplayMode.CALIBRATION;
-                break;
-            case CALIBRATION:
-            default:
-                displayMode = DisplayMode.ANGULAR_HUD;
-                break;
-        }
+        displayMode = displayMode == DisplayMode.ANGULAR_HUD
+                ? DisplayMode.LIVE_CAMERA
+                : DisplayMode.ANGULAR_HUD;
         restartScanTimeout();
         updateDisplayModePresentation();
 
@@ -956,7 +859,7 @@ public class MainActivity extends AppCompatActivity {
             if (cameraProvider != null) {
                 bindCameraUseCases();
                 long now = SystemClock.elapsedRealtime();
-                if (shouldRenderHudDuringScan(now)) {
+                if (hasRenderableTarget(now)) {
                     renderTrackedHud(now);
                 } else {
                     renderScanningState(getString(R.string.status_scanning), activeLensLabel);
@@ -970,45 +873,26 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateDisplayModePresentation() {
-        boolean showPreview = scanSessionActive
-                && (displayMode == DisplayMode.LIVE_CAMERA || displayMode == DisplayMode.CALIBRATION);
+        boolean showPreview = scanSessionActive && displayMode == DisplayMode.LIVE_CAMERA;
         previewView.setVisibility(showPreview ? View.VISIBLE : View.INVISIBLE);
     }
 
     private String getStandbyLensLabel() {
-        switch (displayMode) {
-            case LIVE_CAMERA:
-                return getString(R.string.lens_live_ready);
-            case CALIBRATION:
-                return getString(R.string.lens_calibration_ready);
-            case ANGULAR_HUD:
-            default:
-                return getString(R.string.lens_hud_ready);
-        }
+        return displayMode == DisplayMode.LIVE_CAMERA
+                ? getString(R.string.lens_live_ready)
+                : getString(R.string.lens_hud_ready);
     }
 
     private String getModePrompt() {
-        switch (displayMode) {
-            case LIVE_CAMERA:
-                return getString(R.string.prompt_swipe_mode);
-            case CALIBRATION:
-                return getString(R.string.prompt_calibration_center_tap);
-            case ANGULAR_HUD:
-            default:
-                return getString(R.string.prompt_tap_recenter_swipe_mode);
-        }
+        return displayMode == DisplayMode.LIVE_CAMERA
+                ? getString(R.string.prompt_swipe_mode)
+                : getString(R.string.prompt_tap_recenter_swipe_mode);
     }
 
     private String getModeLabel() {
-        switch (displayMode) {
-            case LIVE_CAMERA:
-                return getString(R.string.mode_live_lock);
-            case CALIBRATION:
-                return getString(R.string.mode_calibration);
-            case ANGULAR_HUD:
-            default:
-                return getString(R.string.mode_angular_lock);
-        }
+        return displayMode == DisplayMode.LIVE_CAMERA
+                ? getString(R.string.mode_live_lock)
+                : getString(R.string.mode_angular_lock);
     }
 
     private String resolveTrackingStatusLabel(boolean predictive) {
@@ -1083,7 +967,6 @@ public class MainActivity extends AppCompatActivity {
 
     private enum DisplayMode {
         ANGULAR_HUD,
-        LIVE_CAMERA,
-        CALIBRATION
+        LIVE_CAMERA
     }
 }
