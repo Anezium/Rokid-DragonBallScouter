@@ -23,7 +23,7 @@ public class ScouterOverlayView extends View {
     private final Paint smallPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint solidPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-    private HudState hudState = HudState.idle("PRESS TO SCAN", "STANDBY", "Tap glasses or screen");
+    private HudState hudState = HudState.idle("PRESS TO SCAN", "STANDBY", "Tap glasses or screen", true);
 
     public ScouterOverlayView(Context context) {
         super(context);
@@ -85,6 +85,9 @@ public class ScouterOverlayView extends View {
         super.onDraw(canvas);
 
         long now = SystemClock.elapsedRealtime();
+        if (hudState.opaqueBackground) {
+            canvas.drawColor(Color.BLACK);
+        }
         drawFrame(canvas);
 
         if (hudState.scanActive) {
@@ -155,7 +158,8 @@ public class ScouterOverlayView extends View {
 
         canvas.drawText(hudState.statusLabel, left, top, headlinePaint);
         canvas.drawText(hudState.lensLabel, left, top + 22f * density, smallPaint);
-        canvas.drawText("MODE: ANGULAR LOCK", left, top + 40f * density, smallPaint);
+        String modeLabel = hudState.modeLabel != null ? hudState.modeLabel : "MODE: SCOUTER";
+        canvas.drawText(modeLabel, left, top + 40f * density, smallPaint);
 
         float panelTop = 54f * density;
         float panelBottom = 148f * density;

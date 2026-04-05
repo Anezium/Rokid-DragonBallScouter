@@ -4,6 +4,8 @@
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowBackground">@color/scouter_black</item>
+        <item name="android:colorBackground">@color/scouter_black</item>
+        <item name="colorSurface">@color/scouter_black</item>
         <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="p">shortEdges</item>
     </style>
 </resources>

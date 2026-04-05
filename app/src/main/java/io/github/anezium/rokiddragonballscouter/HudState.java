@@ -6,6 +6,7 @@ public final class HudState {
     public final String statusLabel;
     public final String lensLabel;
     public final String promptLabel;
+    public final String modeLabel;
     public final RectF targetRect;
     public final int imageWidth;
     public final int imageHeight;
@@ -17,13 +18,20 @@ public final class HudState {
     public final Float lockCenterY;
     public final Float lockScale;
     public final boolean predictiveLock;
+    public final boolean opaqueBackground;
 
-    public static HudState idle(String statusLabel, String lensLabel, String promptLabel) {
+    public static HudState idle(
+            String statusLabel,
+            String lensLabel,
+            String promptLabel,
+            boolean opaqueBackground
+    ) {
         return new HudState(
                 statusLabel,
                 lensLabel,
                 promptLabel,
                 null,
+                null,
                 0,
                 0,
                 null,
@@ -33,19 +41,23 @@ public final class HudState {
                 null,
                 null,
                 null,
-                false
+                false,
+                opaqueBackground
         );
     }
 
-    public static HudState active(String statusLabel, String lensLabel) {
-        return active(statusLabel, lensLabel, null);
-    }
-
-    public static HudState active(String statusLabel, String lensLabel, String promptLabel) {
+    public static HudState active(
+            String statusLabel,
+            String lensLabel,
+            String promptLabel,
+            String modeLabel,
+            boolean opaqueBackground
+    ) {
         return new HudState(
                 statusLabel,
                 lensLabel,
                 promptLabel,
+                modeLabel,
                 null,
                 0,
                 0,
@@ -56,7 +68,8 @@ public final class HudState {
                 null,
                 null,
                 null,
-                false
+                false,
+                opaqueBackground
         );
     }
 
@@ -69,12 +82,16 @@ public final class HudState {
             Integer powerLevel,
             Integer targetId,
             boolean overNineThousand,
-            String promptLabel
+            String promptLabel,
+            String modeLabel,
+            boolean predictiveLock,
+            boolean opaqueBackground
     ) {
         return new HudState(
                 statusLabel,
                 lensLabel,
                 promptLabel,
+                modeLabel,
                 targetRect,
                 imageWidth,
                 imageHeight,
@@ -85,7 +102,8 @@ public final class HudState {
                 null,
                 null,
                 null,
-                false
+                predictiveLock,
+                opaqueBackground
         );
     }
 
@@ -99,12 +117,15 @@ public final class HudState {
             float lockCenterY,
             float lockScale,
             boolean predictiveLock,
-            String promptLabel
+            String promptLabel,
+            String modeLabel,
+            boolean opaqueBackground
     ) {
         return new HudState(
                 statusLabel,
                 lensLabel,
                 promptLabel,
+                modeLabel,
                 null,
                 0,
                 0,
@@ -115,7 +136,8 @@ public final class HudState {
                 lockCenterX,
                 lockCenterY,
                 lockScale,
-                predictiveLock
+                predictiveLock,
+                opaqueBackground
         );
     }
 
@@ -123,6 +145,7 @@ public final class HudState {
             String statusLabel,
             String lensLabel,
             String promptLabel,
+            String modeLabel,
             RectF targetRect,
             int imageWidth,
             int imageHeight,
@@ -133,11 +156,13 @@ public final class HudState {
             Float lockCenterX,
             Float lockCenterY,
             Float lockScale,
-            boolean predictiveLock
+            boolean predictiveLock,
+            boolean opaqueBackground
     ) {
         this.statusLabel = statusLabel;
         this.lensLabel = lensLabel;
         this.promptLabel = promptLabel;
+        this.modeLabel = modeLabel;
         this.targetRect = targetRect;
         this.imageWidth = imageWidth;
         this.imageHeight = imageHeight;
@@ -149,5 +174,6 @@ public final class HudState {
         this.lockCenterY = lockCenterY;
         this.lockScale = lockScale;
         this.predictiveLock = predictiveLock;
+        this.opaqueBackground = opaqueBackground;
     }
 }

@@ -3,7 +3,9 @@ package io.github.anezium.rokiddragonballscouter;
 import android.Manifest;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -15,7 +17,9 @@ import android.hardware.SensorManager;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
 import android.util.SizeF;
+import android.view.GestureDetector;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.View;
 import android.view.WindowInsets;
@@ -31,6 +35,7 @@ import androidx.camera.core.Camera;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageProxy;
+import androidx.camera.core.Preview;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
 import androidx.core.content.ContextCompat;
@@ -61,9 +66,12 @@ public class MainActivity extends AppCompatActivity {
     private static final float DISPLAY_YAW_GAIN = 1.12f;
     private static final float DISPLAY_PITCH_GAIN = 1.18f;
     private static final float DISPLAY_MARGIN_RATIO = 0.10f;
+    private static final float MODE_SWIPE_DISTANCE_DP = 42f;
+    private static final float MODE_SWIPE_DOMINANCE = 1.35f;
 
     private PreviewView previewView;
     private ScouterOverlayView hudView;
+    private GestureDetector gestureDetector;
 
     private FaceDetector faceDetector;
     private ExecutorService cameraExecutor;
@@ -103,6 +111,7 @@ public class MainActivity extends AppCompatActivity {
 
             long now = SystemClock.elapsedRealtime();
             if (scanSessionActive
+                    && displayMode == DisplayMode.ANGULAR_HUD
                     && canProjectTarget(now)
                     && now - lastSensorRenderAt >= SENSOR_RENDER_INTERVAL_MS) {
                 renderTrackedHud(now);
@@ -123,6 +132,7 @@ public class MainActivity extends AppCompatActivity {
 
     private boolean pendingScanRequest = false;
     private String activeLensLabel = "AUTO CAM";
+    private DisplayMode displayMode = DisplayMode.ANGULAR_HUD;
 
     private boolean hasHeadPose = false;
     private boolean hasHeadReference = false;
@@ -137,6 +147,9 @@ public class MainActivity extends AppCompatActivity {
     private float lastTargetWorldYawRad = Float.NaN;
     private float lastTargetWorldPitchRad = Float.NaN;
     private float lastLockScale = 0.18f;
+    private RectF lastTargetRect = null;
+    private int lastTargetImageWidth = 0;
+    private int lastTargetImageHeight = 0;
 
     private float sensorHorizontalFovRad = DEFAULT_SENSOR_HORIZONTAL_FOV_RAD;
     private float sensorVerticalFovRad = DEFAULT_SENSOR_VERTICAL_FOV_RAD;
@@ -165,18 +178,51 @@ public class MainActivity extends AppCompatActivity {
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        getWindow().getDecorView().setBackgroundColor(Color.BLACK);
 
         setContentView(R.layout.activity_main);
         previewView = findViewById(R.id.previewView);
         hudView = findViewById(R.id.hudView);
 
+        previewView.setBackgroundColor(Color.BLACK);
+        hudView.setBackgroundColor(Color.TRANSPARENT);
         previewView.setImplementationMode(PreviewView.ImplementationMode.PERFORMANCE);
         previewView.setScaleType(PreviewView.ScaleType.FILL_CENTER);
         previewView.setVisibility(View.INVISIBLE);
 
+        gestureDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+            @Override
+            public boolean onDown(MotionEvent e) {
+                return true;
+            }
+
+            @Override
+            public boolean onSingleTapUp(MotionEvent e) {
+                onPrimaryAction();
+                return true;
+            }
+
+            @Override
+            public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
+                if (e1 == null || e2 == null) {
+                    return false;
+                }
+
+                float deltaX = e2.getX() - e1.getX();
+                float deltaY = e2.getY() - e1.getY();
+                float minDistance = MODE_SWIPE_DISTANCE_DP * getResources().getDisplayMetrics().density;
+                if (Math.abs(deltaX) >= minDistance
+                        && Math.abs(deltaX) > Math.abs(deltaY) * MODE_SWIPE_DOMINANCE) {
+                    cycleDisplayMode();
+                    return true;
+                }
+                return false;
+            }
+        });
+
         hudView.setClickable(true);
         hudView.setFocusable(true);
-        hudView.setOnClickListener(view -> onPrimaryAction());
+        hudView.setOnTouchListener((view, event) -> gestureDetector.onTouchEvent(event));
 
         sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
         if (sensorManager != null) {
@@ -198,7 +244,10 @@ public class MainActivity extends AppCompatActivity {
 
     private void onPrimaryAction() {
         if (scanSessionActive) {
-            recenterProjection();
+            restartScanTimeout();
+            if (displayMode == DisplayMode.ANGULAR_HUD) {
+                recenterProjection();
+            }
         } else {
             onScanRequested();
         }
@@ -273,6 +322,18 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
+        updateDisplayModePresentation();
+
+        Preview preview = null;
+        if (displayMode == DisplayMode.LIVE_CAMERA) {
+            preview = new Preview.Builder()
+                    .setTargetRotation(previewView.getDisplay() != null
+                            ? previewView.getDisplay().getRotation()
+                            : Surface.ROTATION_0)
+                    .build();
+            preview.setSurfaceProvider(previewView.getSurfaceProvider());
+        }
+
         ImageAnalysis analysis = new ImageAnalysis.Builder()
                 .setTargetRotation(previewView.getDisplay() != null
                         ? previewView.getDisplay().getRotation()
@@ -298,7 +359,9 @@ public class MainActivity extends AppCompatActivity {
 
         for (SelectorCandidate candidate : candidates) {
             try {
-                Camera camera = cameraProvider.bindToLifecycle(this, candidate.selector, analysis);
+                Camera camera = preview != null
+                        ? cameraProvider.bindToLifecycle(this, candidate.selector, preview, analysis)
+                        : cameraProvider.bindToLifecycle(this, candidate.selector, analysis);
                 activeLensLabel = candidate.label;
                 configureCameraProjection(camera);
                 renderScanningState(getString(R.string.status_scanning), activeLensLabel);
@@ -376,7 +439,7 @@ public class MainActivity extends AppCompatActivity {
                         }
 
                         long now = SystemClock.elapsedRealtime();
-                        if (canProjectTarget(now)) {
+                        if (hasRenderableTarget(now)) {
                             renderTrackedHud(now);
                         } else if (now - lastFaceSeenAt > LOST_TARGET_GRACE_MS) {
                             renderScanningState(getString(R.string.status_retrying), activeLensLabel);
@@ -398,7 +461,7 @@ public class MainActivity extends AppCompatActivity {
         updateActiveFovForImage(imageWidth, imageHeight);
 
         if (faces.isEmpty()) {
-            if (canProjectTarget(now)) {
+            if (hasRenderableTarget(now)) {
                 renderTrackedHud(now);
             } else {
                 clearTrackedTarget();
@@ -413,6 +476,9 @@ public class MainActivity extends AppCompatActivity {
         }
 
         Rect bounds = bestFace.getBoundingBox();
+        lastTargetRect = new RectF(bounds);
+        lastTargetImageWidth = imageWidth;
+        lastTargetImageHeight = imageHeight;
         float faceCenterX = bounds.exactCenterX();
         float faceCenterY = bounds.exactCenterY();
         float cameraYawRad = computeAngularOffset(faceCenterX, imageWidth, activeHorizontalFovRad);
@@ -444,6 +510,14 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void renderTrackedHud(long now) {
+        if (displayMode == DisplayMode.LIVE_CAMERA) {
+            renderLiveTrackedHud(now);
+        } else {
+            renderAngularTrackedHud(now);
+        }
+    }
+
+    private void renderAngularTrackedHud(long now) {
         if (!canProjectTarget(now)) {
             renderScanningState(getString(R.string.status_scanning), activeLensLabel);
             return;
@@ -456,14 +530,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         boolean predictive = now - lastFaceSeenAt > FRESH_TRACK_WINDOW_MS;
-        String statusLabel;
-        if (currentPowerLevel > 9000) {
-            statusLabel = getString(R.string.status_over_9000);
-        } else if (predictive) {
-            statusLabel = getString(R.string.status_track_hold);
-        } else {
-            statusLabel = getString(R.string.status_target_lock);
-        }
+        String statusLabel = resolveTrackingStatusLabel(predictive);
 
         hudView.render(HudState.activeAngular(
                 statusLabel,
@@ -475,7 +542,34 @@ public class MainActivity extends AppCompatActivity {
                 projectedLock.centerY,
                 projectedLock.lockScale,
                 predictive,
-                getString(R.string.prompt_tap_to_recenter)
+                getModePrompt(),
+                getModeLabel(),
+                true
+        ));
+    }
+
+    private void renderLiveTrackedHud(long now) {
+        if (!canRenderLiveTarget(now) || lastTargetRect == null) {
+            renderScanningState(getString(R.string.status_scanning), activeLensLabel);
+            return;
+        }
+
+        boolean predictive = now - lastFaceSeenAt > FRESH_TRACK_WINDOW_MS;
+        String statusLabel = resolveTrackingStatusLabel(predictive);
+
+        hudView.render(HudState.active(
+                statusLabel,
+                activeLensLabel,
+                new RectF(lastTargetRect),
+                lastTargetImageWidth,
+                lastTargetImageHeight,
+                currentPowerLevel,
+                currentTargetId != null && currentTargetId >= 0 ? currentTargetId : 1,
+                currentPowerLevel > 9000,
+                getModePrompt(),
+                getModeLabel(),
+                predictive,
+                false
         ));
     }
 
@@ -577,6 +671,9 @@ public class MainActivity extends AppCompatActivity {
         lastTargetWorldYawRad = Float.NaN;
         lastTargetWorldPitchRad = Float.NaN;
         lastLockScale = 0.18f;
+        lastTargetRect = null;
+        lastTargetImageWidth = 0;
+        lastTargetImageHeight = 0;
         sensorHorizontalFovRad = DEFAULT_SENSOR_HORIZONTAL_FOV_RAD;
         sensorVerticalFovRad = DEFAULT_SENSOR_VERTICAL_FOV_RAD;
         activeHorizontalFovRad = DEFAULT_SENSOR_HORIZONTAL_FOV_RAD;
@@ -636,10 +733,25 @@ public class MainActivity extends AppCompatActivity {
                 && now - lastFaceSeenAt <= TARGET_PREDICTION_GRACE_MS;
     }
 
+    private boolean canRenderLiveTarget(long now) {
+        return currentTargetId != null
+                && lastTargetRect != null
+                && now - lastFaceSeenAt <= TARGET_PREDICTION_GRACE_MS;
+    }
+
+    private boolean hasRenderableTarget(long now) {
+        return displayMode == DisplayMode.LIVE_CAMERA
+                ? canRenderLiveTarget(now)
+                : canProjectTarget(now);
+    }
+
     private void clearTrackedTarget() {
         currentTargetId = null;
         lastTargetWorldYawRad = Float.NaN;
         lastTargetWorldPitchRad = Float.NaN;
+        lastTargetRect = null;
+        lastTargetImageWidth = 0;
+        lastTargetImageHeight = 0;
     }
 
     private float clamp(float value, float minValue, float maxValue) {
@@ -676,27 +788,49 @@ public class MainActivity extends AppCompatActivity {
             cameraProvider.unbindAll();
         }
 
-        previewView.setVisibility(View.INVISIBLE);
+        updateDisplayModePresentation();
         renderStandbyState(status, prompt);
     }
 
     private void renderStandbyState() {
-        renderStandbyState(getString(R.string.status_press_to_scan), getString(R.string.prompt_tap_to_scan));
+        renderStandbyState(
+                getString(R.string.status_press_to_scan),
+                getString(R.string.prompt_tap_scan_swipe_mode)
+        );
     }
 
     private void renderStandbyState(String status, String prompt) {
-        hudView.render(HudState.idle(status, getString(R.string.lens_standby), prompt));
+        updateDisplayModePresentation();
+        hudView.render(HudState.idle(
+                status,
+                getStandbyLensLabel(),
+                prompt,
+                true
+        ));
     }
 
     private void renderScanningState(String status, String lensLabel) {
-        hudView.render(HudState.active(status, lensLabel, getString(R.string.prompt_tap_to_recenter)));
+        updateDisplayModePresentation();
+        hudView.render(HudState.active(
+                status,
+                lensLabel,
+                getModePrompt(),
+                getModeLabel(),
+                displayMode == DisplayMode.ANGULAR_HUD
+        ));
     }
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
-        if (event.getAction() == KeyEvent.ACTION_UP && isScanTriggerKey(event.getKeyCode())) {
-            onPrimaryAction();
-            return true;
+        if (event.getAction() == KeyEvent.ACTION_UP) {
+            if (isModeSwitchKey(event.getKeyCode())) {
+                cycleDisplayMode();
+                return true;
+            }
+            if (isScanTriggerKey(event.getKeyCode())) {
+                onPrimaryAction();
+                return true;
+            }
         }
         return super.dispatchKeyEvent(event);
     }
@@ -707,6 +841,68 @@ public class MainActivity extends AppCompatActivity {
                 || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
                 || keyCode == KeyEvent.KEYCODE_BUTTON_A
                 || keyCode == KeyEvent.KEYCODE_SPACE;
+    }
+
+    private boolean isModeSwitchKey(int keyCode) {
+        return keyCode == KeyEvent.KEYCODE_DPAD_LEFT
+                || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT;
+    }
+
+    private void cycleDisplayMode() {
+        displayMode = displayMode == DisplayMode.ANGULAR_HUD
+                ? DisplayMode.LIVE_CAMERA
+                : DisplayMode.ANGULAR_HUD;
+        restartScanTimeout();
+        updateDisplayModePresentation();
+
+        if (scanSessionActive) {
+            if (cameraProvider != null) {
+                bindCameraUseCases();
+                long now = SystemClock.elapsedRealtime();
+                if (hasRenderableTarget(now)) {
+                    renderTrackedHud(now);
+                } else {
+                    renderScanningState(getString(R.string.status_scanning), activeLensLabel);
+                }
+            } else {
+                renderScanningState(getString(R.string.status_scanning), activeLensLabel);
+            }
+        } else {
+            renderStandbyState();
+        }
+    }
+
+    private void updateDisplayModePresentation() {
+        boolean showPreview = scanSessionActive && displayMode == DisplayMode.LIVE_CAMERA;
+        previewView.setVisibility(showPreview ? View.VISIBLE : View.INVISIBLE);
+    }
+
+    private String getStandbyLensLabel() {
+        return displayMode == DisplayMode.LIVE_CAMERA
+                ? getString(R.string.lens_live_ready)
+                : getString(R.string.lens_hud_ready);
+    }
+
+    private String getModePrompt() {
+        return displayMode == DisplayMode.LIVE_CAMERA
+                ? getString(R.string.prompt_swipe_mode)
+                : getString(R.string.prompt_tap_recenter_swipe_mode);
+    }
+
+    private String getModeLabel() {
+        return displayMode == DisplayMode.LIVE_CAMERA
+                ? getString(R.string.mode_live_lock)
+                : getString(R.string.mode_angular_lock);
+    }
+
+    private String resolveTrackingStatusLabel(boolean predictive) {
+        if (currentPowerLevel > 9000) {
+            return getString(R.string.status_over_9000);
+        }
+        if (predictive) {
+            return getString(R.string.status_track_hold);
+        }
+        return getString(R.string.status_target_lock);
     }
 
     private void hideSystemUi() {
@@ -767,5 +963,10 @@ public class MainActivity extends AppCompatActivity {
             this.label = label;
             this.selector = selector;
         }
+    }
+
+    private enum DisplayMode {
+        ANGULAR_HUD,
+        LIVE_CAMERA
     }
 }
