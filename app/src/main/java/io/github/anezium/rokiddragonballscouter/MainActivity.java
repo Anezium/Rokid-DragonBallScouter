@@ -142,6 +142,7 @@ public class MainActivity extends AppCompatActivity {
     private int nextPowerProfileId = 1;
 
     private boolean pendingScanRequest = false;
+    private boolean scanPresentationArmed = false;
     private String activeLensLabel = "AUTO CAM";
     private DisplayMode displayMode = DisplayMode.ANGULAR_HUD;
 
@@ -255,10 +256,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void onPrimaryAction() {
         if (scanSessionActive) {
-            restartScanTimeout();
-            if (displayMode == DisplayMode.ANGULAR_HUD) {
-                recenterProjection();
-            }
+            armNextScan();
         } else {
             onScanRequested();
         }
@@ -282,6 +280,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void beginScanSession() {
         scanSessionActive = true;
+        scanPresentationArmed = true;
         currentTargetId = null;
         currentPowerLevel = PowerLevelGenerator.next();
         currentPowerProfile = null;
@@ -455,7 +454,7 @@ public class MainActivity extends AppCompatActivity {
                         if (hasRenderableTarget(now)) {
                             renderTrackedHud(now);
                         } else if (now - lastFaceSeenAt > LOST_TARGET_GRACE_MS) {
-                            renderScanningState(getString(R.string.status_retrying), activeLensLabel);
+                            renderAwaitingTargetState();
                         }
                     })
                     .addOnCompleteListener(task -> {
@@ -474,12 +473,12 @@ public class MainActivity extends AppCompatActivity {
         updateActiveFovForImage(imageWidth, imageHeight);
 
         if (faces.isEmpty()) {
-            clearActivePresentation();
+            stopRevealSound();
             if (hasRenderableTarget(now)) {
                 renderTrackedHud(now);
             } else {
                 clearTrackedTarget();
-                renderScanningState(getString(R.string.status_scanning), activeLensLabel);
+                renderAwaitingTargetState();
             }
             return;
         }
@@ -490,14 +489,27 @@ public class MainActivity extends AppCompatActivity {
         }
 
         Rect bounds = bestFace.getBoundingBox();
-        lastTargetRect = new RectF(bounds);
-        lastTargetImageWidth = imageWidth;
-        lastTargetImageHeight = imageHeight;
         float faceCenterX = bounds.exactCenterX();
         float faceCenterY = bounds.exactCenterY();
         float cameraYawRad = computeAngularOffset(faceCenterX, imageWidth, activeHorizontalFovRad);
         float cameraPitchRad = -computeAngularOffset(faceCenterY, imageHeight, activeVerticalFovRad);
 
+        PowerProfile powerProfile = resolvePowerProfile(bestFace, bounds, imageWidth, imageHeight, now);
+        boolean trackingCurrentProfile = currentPowerProfile != null
+                && powerProfile.displayTargetId == currentPowerProfile.displayTargetId;
+
+        if (!scanPresentationArmed && !trackingCurrentProfile) {
+            if (hasRenderableTarget(now)) {
+                renderTrackedHud(now);
+            } else {
+                renderAwaitingTargetState();
+            }
+            return;
+        }
+
+        lastTargetRect = new RectF(bounds);
+        lastTargetImageWidth = imageWidth;
+        lastTargetImageHeight = imageHeight;
         lastCameraYawRad = cameraYawRad;
         lastCameraPitchRad = cameraPitchRad;
         lastLockScale = computeLockScale(bounds, imageWidth, imageHeight);
@@ -507,8 +519,7 @@ public class MainActivity extends AppCompatActivity {
         lastTargetWorldYawRad = normalizeAngle(headYawRad + cameraYawRad);
         lastTargetWorldPitchRad = normalizeAngle(headPitchRad + cameraPitchRad);
 
-        PowerProfile powerProfile = resolvePowerProfile(bestFace, bounds, imageWidth, imageHeight, now);
-        if (powerProfile != currentPowerProfile) {
+        if (scanPresentationArmed) {
             beginPowerPresentation(powerProfile, now);
         }
         currentPowerProfile = powerProfile;
@@ -529,13 +540,13 @@ public class MainActivity extends AppCompatActivity {
 
     private void renderAngularTrackedHud(long now) {
         if (!canProjectTarget(now)) {
-            renderScanningState(getString(R.string.status_scanning), activeLensLabel);
+            renderAwaitingTargetState();
             return;
         }
 
         AngularTargetLock projectedLock = projectTrackedTarget();
         if (projectedLock == null) {
-            renderScanningState(getString(R.string.status_scanning), activeLensLabel);
+            renderAwaitingTargetState();
             return;
         }
 
@@ -562,7 +573,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void renderLiveTrackedHud(long now) {
         if (!canRenderLiveTarget(now) || lastTargetRect == null) {
-            renderScanningState(getString(R.string.status_scanning), activeLensLabel);
+            renderAwaitingTargetState();
             return;
         }
 
@@ -790,7 +801,15 @@ public class MainActivity extends AppCompatActivity {
         return (int) Math.floorMod(value, mod);
     }
 
+    private void armNextScan() {
+        restartScanTimeout();
+        scanPresentationArmed = true;
+        clearTrackedTarget();
+        renderAwaitingTargetState();
+    }
+
     private void beginPowerPresentation(PowerProfile profile, long now) {
+        scanPresentationArmed = false;
         stopRevealSound();
         profile.analysisStartedAt = now;
         startRevealSound();
@@ -951,6 +970,7 @@ public class MainActivity extends AppCompatActivity {
     private void stopScanSession(String status, String prompt) {
         scanSessionActive = false;
         pendingScanRequest = false;
+        scanPresentationArmed = false;
         currentTargetId = null;
         clearActivePresentation();
         lastFaceSeenAt = 0L;
@@ -996,6 +1016,13 @@ public class MainActivity extends AppCompatActivity {
                 getModeLabel(),
                 displayMode == DisplayMode.ANGULAR_HUD
         ));
+    }
+
+    private void renderAwaitingTargetState() {
+        String status = scanPresentationArmed
+                ? getString(R.string.status_scanning)
+                : getString(R.string.status_press_to_scan);
+        renderScanningState(status, activeLensLabel);
     }
 
     @Override
@@ -1062,9 +1089,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String getModePrompt() {
-        return displayMode == DisplayMode.LIVE_CAMERA
-                ? getString(R.string.prompt_swipe_mode)
-                : getString(R.string.prompt_tap_recenter_swipe_mode);
+        return getString(R.string.prompt_tap_scan_swipe_mode);
     }
 
     private String getModeLabel() {
