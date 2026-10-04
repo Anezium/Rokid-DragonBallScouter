@@ -100,3 +100,9 @@ GitHub Actions also builds the debug APK automatically on pushes, pull requests,
 
 - The repo includes the original logo and sound assets used by the app.
 - This is an Android MVP tuned around Rokid glasses behavior, so exact camera alignment can still vary by device and fit.
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE) for attribution.
+
+Contributions are accepted under the same license (Apache-2.0, section 5) — no CLA required.
